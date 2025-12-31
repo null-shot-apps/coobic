@@ -1,249 +1,419 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
-interface Field {
+export interface EntityField {
   id: string;
   name: string;
-  type: 'text' | 'number' | 'boolean' | 'date' | 'email' | 'textarea';
+  type: 'text' | 'number' | 'boolean' | 'date' | 'email' | 'url' | 'textarea' | 'select' | 'multiselect';
   required: boolean;
+  options?: string[]; // For select/multiselect
+  defaultValue?: string | number | boolean;
+  validation?: {
+    min?: number;
+    max?: number;
+    pattern?: string;
+  };
 }
 
-interface EntitySchema {
-  id?: string;
+export interface EntitySchema {
+  id: string;
   name: string;
   description: string;
-  fields: Field[];
+  fields: EntityField[];
+  permissions?: {
+    create: string[];
+    read: string[];
+    update: string[];
+    delete: string[];
+  };
 }
 
 interface Props {
-  onSave: (schema: EntitySchema) => void;
-  editingEntity?: EntitySchema | null;
-  onCancel: () => void;
+  onBack: () => void;
 }
 
-export default function EntitySchemaEditor({ onSave, editingEntity, onCancel }: Props) {
-  const [entityName, setEntityName] = useState('');
-  const [description, setDescription] = useState('');
-  const [fields, setFields] = useState<Field[]>([]);
-  const [fieldName, setFieldName] = useState('');
-  const [fieldType, setFieldType] = useState<Field['type']>('text');
-  const [fieldRequired, setFieldRequired] = useState(false);
+export default function EntitySchemaEditor({ onBack }: Props) {
+  const [schemas, setSchemas] = useState<EntitySchema[]>([]);
+  const [currentSchema, setCurrentSchema] = useState<EntitySchema | null>(null);
+  const [editingField, setEditingField] = useState<EntityField | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importJson, setImportJson] = useState('');
 
-  useEffect(() => {
-    if (editingEntity) {
-      setEntityName(editingEntity.name);
-      setDescription(editingEntity.description);
-      setFields(editingEntity.fields);
-    }
-  }, [editingEntity]);
+  const createNewSchema = () => {
+    const newSchema: EntitySchema = {
+      id: crypto.randomUUID(),
+      name: 'Nuova Entità',
+      description: '',
+      fields: [],
+    };
+    setCurrentSchema(newSchema);
+  };
 
   const addField = () => {
-    if (!fieldName.trim()) return;
+    if (!currentSchema) return;
     
-    const newField: Field = {
-      id: Date.now().toString(),
-      name: fieldName,
-      type: fieldType,
-      required: fieldRequired
+    const newField: EntityField = {
+      id: crypto.randomUUID(),
+      name: 'Nuovo Campo',
+      type: 'text',
+      required: false,
     };
     
-    setFields([...fields, newField]);
-    setFieldName('');
-    setFieldType('text');
-    setFieldRequired(false);
+    setCurrentSchema({
+      ...currentSchema,
+      fields: [...currentSchema.fields, newField],
+    });
+    setEditingField(newField);
   };
 
-  const removeField = (id: string) => {
-    setFields(fields.filter(f => f.id !== id));
-  };
-
-  const handleSave = () => {
-    if (!entityName.trim() || fields.length === 0) return;
+  const updateField = (fieldId: string, updates: Partial<EntityField>) => {
+    if (!currentSchema) return;
     
-    const schema: EntitySchema = {
-      ...(editingEntity?.id && { id: editingEntity.id }),
-      name: entityName,
-      description,
-      fields
-    };
+    setCurrentSchema({
+      ...currentSchema,
+      fields: currentSchema.fields.map(f => 
+        f.id === fieldId ? { ...f, ...updates } : f
+      ),
+    });
     
-    onSave(schema);
-    resetForm();
+    if (editingField?.id === fieldId) {
+      setEditingField({ ...editingField, ...updates });
+    }
   };
 
-  const resetForm = () => {
-    setEntityName('');
-    setDescription('');
-    setFields([]);
-    setFieldName('');
-    setFieldType('text');
-    setFieldRequired(false);
+  const deleteField = (fieldId: string) => {
+    if (!currentSchema) return;
+    
+    setCurrentSchema({
+      ...currentSchema,
+      fields: currentSchema.fields.filter(f => f.id !== fieldId),
+    });
+    
+    if (editingField?.id === fieldId) {
+      setEditingField(null);
+    }
   };
 
-  const handleCancel = () => {
-    resetForm();
-    onCancel();
+  const saveSchema = () => {
+    if (!currentSchema) return;
+    
+    const existingIndex = schemas.findIndex(s => s.id === currentSchema.id);
+    if (existingIndex >= 0) {
+      setSchemas(schemas.map((s, i) => i === existingIndex ? currentSchema : s));
+    } else {
+      setSchemas([...schemas, currentSchema]);
+    }
+    
+    setCurrentSchema(null);
+    setEditingField(null);
   };
 
-  const exportSchema = () => {
-    const schema = { name: entityName, description, fields };
-    const blob = new Blob([JSON.stringify(schema, null, 2)], { type: 'application/json' });
+  const exportSchema = (schema: EntitySchema) => {
+    const json = JSON.stringify(schema, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${entityName || 'entity'}-schema.json`;
+    a.download = `${schema.name.toLowerCase().replace(/\s+/g, '-')}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const importSchema = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const schema = JSON.parse(event.target?.result as string);
-        setEntityName(schema.name || '');
-        setDescription(schema.description || '');
-        setFields(schema.fields || []);
-      } catch (error) {
-        alert('Invalid JSON file');
-      }
-    };
-    reader.readAsText(file);
+  const importSchema = () => {
+    try {
+      const schema = JSON.parse(importJson) as EntitySchema;
+      schema.id = crypto.randomUUID(); // New ID for imported schema
+      setSchemas([...schemas, schema]);
+      setImportJson('');
+      setShowImport(false);
+    } catch (error) {
+      alert('JSON non valido. Controlla il formato.');
+    }
   };
 
+  const fieldTypes = [
+    { value: 'text', label: 'Testo' },
+    { value: 'textarea', label: 'Testo Lungo' },
+    { value: 'number', label: 'Numero' },
+    { value: 'boolean', label: 'Booleano' },
+    { value: 'date', label: 'Data' },
+    { value: 'email', label: 'Email' },
+    { value: 'url', label: 'URL' },
+    { value: 'select', label: 'Selezione' },
+    { value: 'multiselect', label: 'Selezione Multipla' },
+  ];
+
   return (
-    <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 shadow-2xl border border-white/20">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-white">
-          {editingEntity ? 'Edit Entity' : 'Create Entity'}
-        </h2>
-        <div className="flex gap-2">
-          <button
-            onClick={exportSchema}
-            disabled={!entityName || fields.length === 0}
-            className="px-3 py-1 text-sm bg-blue-500/20 text-blue-200 rounded-lg hover:bg-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Export JSON
-          </button>
-          <label className="px-3 py-1 text-sm bg-green-500/20 text-green-200 rounded-lg hover:bg-green-500/30 cursor-pointer">
-            Import JSON
-            <input
-              type="file"
-              accept=".json"
-              onChange={importSchema}
-              className="hidden"
-            />
-          </label>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-200 mb-2">Entity Name</label>
-          <input
-            type="text"
-            value={entityName}
-            onChange={(e) => setEntityName(e.target.value)}
-            placeholder="e.g., Customer, Product, Order"
-            className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-200 mb-2">Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Describe this entity..."
-            rows={2}
-            className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
-        </div>
-
-        <div className="border-t border-white/10 pt-4">
-          <h3 className="text-lg font-semibold text-white mb-3">Fields</h3>
-          
-          <div className="grid grid-cols-12 gap-2 mb-3">
-            <input
-              type="text"
-              value={fieldName}
-              onChange={(e) => setFieldName(e.target.value)}
-              placeholder="Field name"
-              className="col-span-5 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-            />
-            <select
-              value={fieldType}
-              onChange={(e) => setFieldType(e.target.value as Field['type'])}
-              className="col-span-4 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-            >
-              <option value="text">Text</option>
-              <option value="number">Number</option>
-              <option value="boolean">Boolean</option>
-              <option value="date">Date</option>
-              <option value="email">Email</option>
-              <option value="textarea">Textarea</option>
-            </select>
-            <label className="col-span-2 flex items-center text-sm text-slate-200">
-              <input
-                type="checkbox"
-                checked={fieldRequired}
-                onChange={(e) => setFieldRequired(e.target.checked)}
-                className="mr-1"
-              />
-              Required
-            </label>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4">
             <button
-              onClick={addField}
-              className="col-span-1 px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 text-sm font-medium"
+              onClick={onBack}
+              className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
             >
-              +
+              ← Indietro
+            </button>
+            <h1 className="text-4xl font-bold">Editor Schemi Entità</h1>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowImport(true)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+            >
+              📥 Importa JSON
+            </button>
+            <button
+              onClick={createNewSchema}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+            >
+              + Nuova Entità
             </button>
           </div>
+        </div>
 
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {fields.map((field) => (
-              <div
-                key={field.id}
-                className="flex items-center justify-between bg-white/5 px-4 py-2 rounded-lg border border-white/10"
-              >
-                <div className="flex-1">
-                  <span className="text-white font-medium">{field.name}</span>
-                  <span className="text-slate-400 text-sm ml-3">
-                    {field.type}
-                    {field.required && <span className="text-red-400 ml-1">*</span>}
-                  </span>
-                </div>
+        {/* Import Modal */}
+        {showImport && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-slate-800 rounded-xl p-6 max-w-2xl w-full mx-4">
+              <h2 className="text-2xl font-bold mb-4">Importa Schema JSON</h2>
+              <textarea
+                value={importJson}
+                onChange={(e) => setImportJson(e.target.value)}
+                className="w-full h-64 bg-slate-900 text-white p-4 rounded-lg font-mono text-sm"
+                placeholder="Incolla qui il JSON dello schema..."
+              />
+              <div className="flex gap-3 mt-4">
                 <button
-                  onClick={() => removeField(field.id)}
-                  className="text-red-400 hover:text-red-300 text-sm"
+                  onClick={importSchema}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
                 >
-                  Remove
+                  Importa
+                </button>
+                <button
+                  onClick={() => {
+                    setShowImport(false);
+                    setImportJson('');
+                  }}
+                  className="px-4 py-2 bg-slate-600 hover:bg-slate-700 rounded-lg transition-colors"
+                >
+                  Annulla
                 </button>
               </div>
-            ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="flex gap-3 pt-4">
-          <button
-            onClick={handleSave}
-            disabled={!entityName.trim() || fields.length === 0}
-            className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {editingEntity ? 'Update Entity' : 'Create Entity'}
-          </button>
-          {editingEntity && (
-            <button
-              onClick={handleCancel}
-              className="px-6 py-3 bg-slate-500/20 text-slate-200 rounded-lg font-semibold hover:bg-slate-500/30"
-            >
-              Cancel
-            </button>
-          )}
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Schema List */}
+          <div className="lg:col-span-1">
+            <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+              <h2 className="text-xl font-semibold mb-4">Schemi Salvati</h2>
+              {schemas.length === 0 ? (
+                <p className="text-slate-400 text-sm">Nessuno schema creato ancora</p>
+              ) : (
+                <div className="space-y-2">
+                  {schemas.map(schema => (
+                    <div
+                      key={schema.id}
+                      className="bg-white/5 hover:bg-white/10 p-4 rounded-lg transition-colors cursor-pointer group"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div
+                          onClick={() => setCurrentSchema({ ...schema })}
+                          className="flex-1"
+                        >
+                          <h3 className="font-semibold">{schema.name}</h3>
+                          <p className="text-sm text-slate-400">{schema.fields.length} campi</p>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            exportSchema(schema);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-all"
+                        >
+                          📤
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Schema Editor */}
+          <div className="lg:col-span-2">
+            {currentSchema ? (
+              <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+                <div className="mb-6">
+                  <input
+                    type="text"
+                    value={currentSchema.name}
+                    onChange={(e) => setCurrentSchema({ ...currentSchema, name: e.target.value })}
+                    className="text-3xl font-bold bg-transparent border-b border-white/20 focus:border-white/40 outline-none w-full mb-2"
+                    placeholder="Nome Entità"
+                  />
+                  <textarea
+                    value={currentSchema.description}
+                    onChange={(e) => setCurrentSchema({ ...currentSchema, description: e.target.value })}
+                    className="w-full bg-white/5 rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-purple-500"
+                    placeholder="Descrizione..."
+                    rows={2}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-semibold">Campi ({currentSchema.fields.length})</h3>
+                  <button
+                    onClick={addField}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors text-sm"
+                  >
+                    + Aggiungi Campo
+                  </button>
+                </div>
+
+                {/* Fields List */}
+                <div className="space-y-3 mb-6">
+                  {currentSchema.fields.map(field => (
+                    <div
+                      key={field.id}
+                      className={`bg-white/5 p-4 rounded-lg border-2 transition-all cursor-pointer ${
+                        editingField?.id === field.id
+                          ? 'border-purple-500'
+                          : 'border-transparent hover:border-white/20'
+                      }`}
+                      onClick={() => setEditingField(field)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold">{field.name}</span>
+                            {field.required && (
+                              <span className="text-xs bg-red-500/20 text-red-300 px-2 py-0.5 rounded">
+                                Obbligatorio
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-400">
+                            {fieldTypes.find(t => t.value === field.type)?.label}
+                          </p>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteField(field.id);
+                          }}
+                          className="px-3 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-300 rounded transition-colors text-sm"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Field Editor Panel */}
+                {editingField && (
+                  <div className="bg-purple-900/20 border border-purple-500/30 rounded-xl p-6 mb-6">
+                    <h4 className="text-lg font-semibold mb-4">Modifica Campo</h4>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Nome Campo</label>
+                        <input
+                          type="text"
+                          value={editingField.name}
+                          onChange={(e) => updateField(editingField.id, { name: e.target.value })}
+                          className="w-full bg-white/10 rounded-lg p-3 outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Tipo</label>
+                        <select
+                          value={editingField.type}
+                          onChange={(e) => updateField(editingField.id, { type: e.target.value as EntityField['type'] })}
+                          className="w-full bg-white/10 rounded-lg p-3 outline-none focus:ring-2 focus:ring-purple-500"
+                        >
+                          {fieldTypes.map(type => (
+                            <option key={type.value} value={type.value}>
+                              {type.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {(editingField.type === 'select' || editingField.type === 'multiselect') && (
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Opzioni (una per riga)</label>
+                          <textarea
+                            value={editingField.options?.join('\n') || ''}
+                            onChange={(e) => updateField(editingField.id, { 
+                              options: e.target.value.split('\n').filter(o => o.trim()) 
+                            })}
+                            className="w-full bg-white/10 rounded-lg p-3 outline-none focus:ring-2 focus:ring-purple-500"
+                            rows={4}
+                            placeholder="Opzione 1&#10;Opzione 2&#10;Opzione 3"
+                          />
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="required"
+                          checked={editingField.required}
+                          onChange={(e) => updateField(editingField.id, { required: e.target.checked })}
+                          className="w-4 h-4"
+                        />
+                        <label htmlFor="required" className="text-sm font-medium">
+                          Campo Obbligatorio
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Save Button */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={saveSchema}
+                    className="flex-1 px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg transition-colors font-semibold"
+                  >
+                    💾 Salva Schema
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCurrentSchema(null);
+                      setEditingField(null);
+                    }}
+                    className="px-6 py-3 bg-slate-600 hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-12 text-center">
+                <div className="text-6xl mb-4">🏗️</div>
+                <h3 className="text-2xl font-semibold mb-2">Nessuno schema selezionato</h3>
+                <p className="text-slate-400 mb-6">
+                  Crea un nuovo schema o selezionane uno esistente per iniziare
+                </p>
+                <button
+                  onClick={createNewSchema}
+                  className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg transition-colors font-semibold"
+                >
+                  + Crea Nuovo Schema
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
