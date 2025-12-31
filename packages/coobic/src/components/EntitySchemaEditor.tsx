@@ -5,9 +5,14 @@ import { useState } from 'react';
 export interface EntityField {
   id: string;
   name: string;
-  type: 'text' | 'number' | 'boolean' | 'date' | 'email' | 'url' | 'textarea' | 'select' | 'multiselect';
+  type: 'text' | 'number' | 'boolean' | 'date' | 'email' | 'url' | 'textarea' | 'select' | 'multiselect' | 'relation';
   required: boolean;
   options?: string[]; // For select/multiselect
+  relationConfig?: {
+    targetEntity: string; // ID or name of the target entity
+    relationType: 'one-to-one' | 'one-to-many' | 'many-to-many';
+    displayField?: string; // Which field to display from related entity
+  };
   defaultValue?: string | number | boolean;
   validation?: {
     min?: number;
@@ -142,6 +147,7 @@ export default function EntitySchemaEditor({ onBack }: Props) {
     { value: 'url', label: 'URL' },
     { value: 'select', label: 'Selezione' },
     { value: 'multiselect', label: 'Selezione Multipla' },
+    { value: 'relation', label: 'Relazione' },
   ];
 
   return (
@@ -363,6 +369,72 @@ export default function EntitySchemaEditor({ onBack }: Props) {
                         </div>
                       )}
 
+                      {editingField.type === 'relation' && (
+                        <div className="space-y-4 bg-blue-900/20 border border-blue-500/30 rounded-lg p-4">
+                          <div>
+                            <label className="block text-sm font-medium mb-2">Entità Collegata</label>
+                            <select
+                              value={editingField.relationConfig?.targetEntity || ''}
+                              onChange={(e) => updateField(editingField.id, { 
+                                relationConfig: {
+                                  ...editingField.relationConfig,
+                                  targetEntity: e.target.value,
+                                  relationType: editingField.relationConfig?.relationType || 'one-to-one',
+                                }
+                              })}
+                              className="w-full bg-white/10 rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="">Seleziona entità...</option>
+                              {schemas.map(schema => (
+                                <option key={schema.id} value={schema.id}>
+                                  {schema.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium mb-2">Tipo di Relazione</label>
+                            <select
+                              value={editingField.relationConfig?.relationType || 'one-to-one'}
+                              onChange={(e) => updateField(editingField.id, { 
+                                relationConfig: {
+                                  ...editingField.relationConfig,
+                                  targetEntity: editingField.relationConfig?.targetEntity || '',
+                                  relationType: e.target.value as 'one-to-one' | 'one-to-many' | 'many-to-many',
+                                }
+                              })}
+                              className="w-full bg-white/10 rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="one-to-one">Uno a Uno</option>
+                              <option value="one-to-many">Uno a Molti</option>
+                              <option value="many-to-many">Molti a Molti</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium mb-2">Campo da Visualizzare</label>
+                            <input
+                              type="text"
+                              value={editingField.relationConfig?.displayField || ''}
+                              onChange={(e) => updateField(editingField.id, { 
+                                relationConfig: {
+                                  ...editingField.relationConfig,
+                                  targetEntity: editingField.relationConfig?.targetEntity || '',
+                                  relationType: editingField.relationConfig?.relationType || 'one-to-one',
+                                  displayField: e.target.value,
+                                }
+                              })}
+                              className="w-full bg-white/10 rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="es: name, title, email..."
+                            />
+                            <p className="text-xs text-slate-400 mt-1">
+                              Campo dell&apos;entità collegata da mostrare nella selezione
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -419,4 +491,7 @@ export default function EntitySchemaEditor({ onBack }: Props) {
     </div>
   );
 }
+
+
+
 
